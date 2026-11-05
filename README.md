@@ -21,7 +21,9 @@ Florida is in the Southeast Region (SER) and follows the [USA road-type standard
 - **Under-typed segments (red dashed outline).** Each segment is matched to the nearest FDOT line that runs the same direction. The script then works out the expected type from the full USA table. It reads the highway system from the segment's primary and alternate names (`I-`, `US-`, `SR-`, `CR-`, with BUS/SPUR/LOOP handled separately).
   - A segment is not flagged when a correctly typed road runs alongside it in the same direction. This covers turn lanes, connectors and frontage roads.
   - The opposite carriageway of a divided road doesn't count as cover, so a mistyped carriageway is still flagged.
-- **State Road name check (orange dotted outline).** A segment named `SR-N` is flagged when FDOT's State Roads layer has no route N running alongside it. Examples are a wrong number or a road that is really a county road. Unconfirmed SR names are ignored for the road-type check, so a bad name shows here and not as a misleading red flag.
+- **State Road name check (orange dotted outline).** A segment named `SR-N` is flagged when N isn't a Florida State Road number. The typical case is a county road mislabeled as a state road (`SR-420` that should be `CR-420`).
+  - The 520 valid numbers are hard-coded in the script (`FL_STATE_ROADS`). They come from FDOT's State Roads layer plus Wikipedia's list of Florida state roads, captured 2026-11-04.
+  - Invalid SR names are ignored for the road-type check, so a bad name shows here and not as a misleading red flag.
 - **Selected-segment details.** Select a segment to see the following in the **FL FC** sidebar tab:
   - its names, highway system, current type and expected type
   - the result of the SR name check
@@ -44,10 +46,8 @@ The script uses `GM_xmlhttpRequest` with `@connect services1.arcgis.com` because
 
 ## Data sources
 
-Both layers are public FDOT Transportation Data & Analytics (TDA) feature services:
-
-- [Functional_Classification_TDA](https://www.arcgis.com/home/item.html?id=5c629bc81b104fca8d937343cdcefe29) (RCI Feature 121, `FUNCLASS`)
-- [State_Roads_TDA](https://www.arcgis.com/home/item.html?id=d8ce6b8eee2646e6a0b534281e0391a0) (State Highway System routes)
+- [Functional_Classification_TDA](https://www.arcgis.com/home/item.html?id=5c629bc81b104fca8d937343cdcefe29): FDOT TDA public feature service (RCI Feature 121, `FUNCLASS`), queried live.
+- The State Road number list is a static snapshot. It combines FDOT [State_Roads_TDA](https://www.arcgis.com/home/item.html?id=d8ce6b8eee2646e6a0b534281e0391a0) with the 7 extra routes from [Wikipedia](https://en.wikipedia.org/wiki/List_of_state_roads_in_Florida). Refresh it if FDOT adds new routes.
 
 FDOT notes that this data reflects the most recent inventory and may not match current conditions. Always confirm against signage and local guidance before editing.
 
@@ -61,7 +61,6 @@ Constants near the top of the mismatch section in the script:
 | `MATCH_DIST_M` | 20 | Maximum distance from a segment's midpoint to an FDOT FC line |
 | `MATCH_ANGLE_DEG` | 30 | Maximum difference in direction for a match |
 | `COVER_DIST_M` | 30 | How close a correctly typed parallel road must be to cover a segment |
-| `SR_MATCH_DIST_M` | 30 | Maximum distance to an FDOT State Road line for an SR name to count as confirmed |
 
 The FC → road type defaults are in `FC_TO_RT`, and the full table is `USA_TABLE`.
 
@@ -70,7 +69,8 @@ The FC → road type defaults are in `FC_TO_RT`, and the full table is `USA_TABL
 - **FC 02/12:** FDOT puts "Other Freeway" and "Other Expressway" in one code. The script uses Major Highway as the minimum, so fully controlled-access roads typed Major Highway are not flagged for being below Freeway.
 - **Frontage roads:** the "at least Primary Street" rule isn't checked.
 - **Promotions:** roads raised above their class for continuity are never flagged. Only roads typed lower than expected are.
-- **Name formats:** names that aren't in `I-`/`US-`/`SR-`/`CR-` form are treated as locally maintained. Only `SR-`/`FL-` names are checked against FDOT State Roads.
+- **Name formats:** names that aren't in `I-`/`US-`/`SR-`/`CR-` form are treated as locally maintained.
+- **SR name check:** only `SR-`/`FL-` names are checked, and only whether the number exists in Florida. A real number on the wrong road (for example `SR-434` on SR 46) isn't caught. Letter suffixes and `SR-A1A` aren't checked.
 - **Wide divided roads:** carriageways far from FDOT's single median line may fall outside the match distances.
 
 ## Built with

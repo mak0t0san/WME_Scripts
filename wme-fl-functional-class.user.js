@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WME Florida Functional Classification Overlay
 // @namespace    https://github.com/makotosan/wme-fl-funcclass
-// @version      0.3.0
+// @version      0.4.0
 // @description  Overlays FDOT functional classification on the Waze Map Editor, colored by the Waze road type each FC calls for, and flags under-typed segments.
 // @author       makoto
 // @license      MIT
@@ -28,9 +28,6 @@
   const MAX_PAGES = 10;
   const QUERY_URL =
     "https://services1.arcgis.com/O1JpcwDW8sjYuddV/arcgis/rest/services/Functional_Classification_TDA/FeatureServer/0/query";
-  // FDOT State Highway System routes (one record per route, so concurrent SRs are separate lines).
-  const SR_QUERY_URL =
-    "https://services1.arcgis.com/O1JpcwDW8sjYuddV/arcgis/rest/services/State_Roads_TDA/FeatureServer/0/query";
 
   // --- Waze road types: id (SDK ROAD_TYPE), rank (higher = more important), WME color ---
   const RT = {
@@ -175,7 +172,6 @@
   const segMatchCache = new Map();
   let fetchController = null;
   let lastFetchInfo = "";
-  let srFeatures = null; // GeoJSON features from State_Roads_TDA in view; null = not loaded (skip SR check)
 
   // WME's Content Security Policy blocks page-level fetch() to arcgis.com, so
   // requests go through Tampermonkey (runs outside the page; needs @connect).
@@ -249,7 +245,6 @@
     const zoom = await sdk.Map.getZoomLevel();
     if (zoom < MIN_ZOOM) {
       fcFeatures.clear();
-      srFeatures = null;
       await renderFc();
       await renderMismatches();
       setStatus(`Zoom in to ${MIN_ZOOM}+ to load data (now ${zoom}).`);
@@ -266,21 +261,16 @@
     const tolerance = (bbox[2] - bbox[0]) / Math.max(window.innerWidth, 800);
 
     setStatus("Loading…");
-    let fc, sr;
+    let fc;
     try {
-      [fc, sr] = await Promise.all([
-        codes.length
-          ? queryInView(
-              QUERY_URL,
-              `FUNCLASS IN (${codes.map((c) => `'${c}'`).join(",")})`,
-              "FID,FUNCLASS,ROADWAY,COUNTY,BEGIN_POST,END_POST",
-              bbox, tolerance, signal
-            )
-          : [],
-        settings.checkSrNames
-          ? queryInView(SR_QUERY_URL, "1=1", "FID,ROUTE,RouteNum,ROADWAY", bbox, tolerance, signal)
-          : null,
-      ]);
+      fc = codes.length
+        ? await queryInView(
+            QUERY_URL,
+            `FUNCLASS IN (${codes.map((c) => `'${c}'`).join(",")})`,
+            "FID,FUNCLASS,ROADWAY,COUNTY,BEGIN_POST,END_POST",
+            bbox, tolerance, signal
+          )
+        : [];
     } catch (err) {
       if (err.name === "AbortError") return; // superseded by a newer pan
       console.error(`[${SCRIPT_NAME}]`, err);
@@ -290,11 +280,7 @@
 
     fcFeatures.clear();
     for (const f of fc) fcFeatures.set(f.properties.FID, f);
-    srFeatures = sr;
-    lastFetchInfo =
-      `${fcFeatures.size} FC lines` +
-      (srFeatures ? ` · ${srFeatures.length} SR lines` : "") +
-      ` · ${new Date().toLocaleTimeString()}`;
+    lastFetchInfo = `${fcFeatures.size} FC lines · ${new Date().toLocaleTimeString()}`;
     await renderFc();
     await renderMismatches();
   }
@@ -461,44 +447,45 @@
     return false;
   }
 
-  const SR_MATCH_DIST_M = 30;
+  // Every Florida State Road number (numeric part only). Snapshot taken
+  // 2026-11-04 from FDOT State_Roads_TDA (513 numbers) plus routes listed on
+  // Wikipedia's "List of state roads in Florida" but missing from that layer
+  // (525, 575, 581, 607, 615, 732, 850). Interstates and US routes also carry
+  // hidden SR numbers (e.g. I-75 = SR-93, US-19 = SR-55), so those are included.
+  const FL_STATE_ROADS = new Set((
+    "2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 28 29 30 31 33 35 37 39 40 41 " +
+    "43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 59 60 61 62 63 64 65 66 68 69 70 71 72 73 75 76 77 " +
+    "78 79 80 81 82 83 84 85 87 89 90 91 93 94 95 97 99 100 101 102 103 104 105 106 109 111 112 113 " +
+    "114 115 116 117 118 120 121 122 123 126 128 129 134 136 139 143 145 152 155 157 159 160 162 166 " +
+    "173 187 188 189 190 196 200 201 202 206 207 208 210 211 212 222 223 224 226 228 230 231 235 238 " +
+    "243 247 249 253 261 262 263 265 267 269 273 275 276 277 279 281 283 285 287 289 291 292 293 294 " +
+    "295 296 297 298 300 312 320 321 326 327 331 345 349 359 361 363 366 368 369 370 371 373 375 377 " +
+    "384 385 388 389 390 391 392 393 397 399 400 401 404 405 406 407 408 410 411 412 413 414 415 416 " +
+    "417 419 421 423 424 426 429 430 432 434 435 436 437 438 441 442 451 453 460 461 462 463 464 465 " +
+    "466 467 469 471 472 482 483 492 500 501 507 508 510 512 513 514 517 518 519 520 524 525 526 527 " +
+    "528 530 531 533 535 536 537 538 539 540 542 544 545 546 547 548 549 551 552 553 555 557 558 559 " +
+    "560 561 562 563 564 565 566 567 568 569 570 571 572 573 574 575 577 579 580 581 582 583 584 585 " +
+    "586 587 589 590 591 592 593 594 595 596 597 599 600 606 607 608 611 613 614 615 616 618 620 628 " +
+    "636 647 649 651 653 655 656 657 658 659 660 661 662 663 664 665 666 667 671 673 674 675 676 678 " +
+    "679 681 682 683 684 685 686 687 688 689 690 692 693 694 699 700 704 706 708 710 712 713 714 715 " +
+    "716 717 718 727 729 732 736 739 740 742 750 752 754 758 762 768 769 776 777 780 786 789 794 800 " +
+    "802 804 805 806 807 808 809 810 811 812 814 816 817 818 820 821 822 823 824 825 826 833 834 836 " +
+    "838 842 843 844 845 846 847 848 849 850 852 856 858 860 862 863 864 865 867 869 870 874 876 878 " +
+    "880 882 884 886 887 907 909 913 915 916 918 922 923 924 925 927 928 929 932 933 934 938 939 944 " +
+    "948 949 951 953 958 959 960 961 962 963 968 969 970 972 973 975 976 979 985 986 988 989 990 992 " +
+    "994 996 997 998 1010 1051 1151 1153 1155 2221 5001 5005 5009 5050 5052 5054 9336"
+  ).split(" "));
 
-  // "SR-420", "SR-9A", "SR-60 BUS" -> "420", "9", "60". Compare numbers only:
-  // FDOT uses internal letter suffixes (5A, 30F, 19S) that don't match signage.
+  // "SR-420", "SR-9A", "SR-60 BUS" -> "420", "9", "60". Numbers only: FDOT's
+  // letter suffixes (5A, 30F, 19S) don't consistently match signage.
   const srNumberOfName = (name) => name?.toUpperCase().match(/^(?:SR|FL)-(\d+)/)?.[1] ?? null;
-  const srNumberOfRoute = (routeNum) => String(routeNum ?? "").match(/^\d+/)?.[0] ?? null;
 
-  function buildSrIndex(project) {
-    const grid = makeGrid();
-    for (const f of srFeatures || []) {
-      const num = srNumberOfRoute(f.properties.RouteNum);
-      if (!num) continue;
-      for (const line of linesOf(f.geometry)) {
-        const pts = line.map(project);
-        for (let i = 1; i < pts.length; i++) {
-          grid.add({ a: pts[i - 1], b: pts[i], brg: bearing(pts[i - 1], pts[i]), num });
-        }
-      }
-    }
-    return grid;
-  }
-
-  // SR-xxx names on this segment with no matching FDOT State Road alongside it.
-  function invalidSrNames(names, mb, srGrid) {
-    const bad = [];
-    for (const name of new Set(names)) {
-      const num = srNumberOfName(name);
-      if (!num) continue;
-      const ok = srGrid.near(mb.p).some(
-        (e) =>
-          e.num === num &&
-          angleDiff(e.brg, mb.brg) <= MATCH_ANGLE_DEG &&
-          distPointToSeg(mb.p, e.a, e.b) <= SR_MATCH_DIST_M
-      );
-      if (!ok) bad.push(name);
-    }
-    return bad;
-  }
+  // SR-xxx names whose number isn't a Florida State Road anywhere.
+  const invalidSrNames = (names) =>
+    [...new Set(names)].filter((n) => {
+      const num = srNumberOfName(n);
+      return num && !FL_STATE_ROADS.has(num);
+    });
 
   // Street names (primary + alternates) for a segment, cached by street id.
   const streetNameCache = new Map();
@@ -520,13 +507,12 @@
     await sdk.Map.removeAllFeaturesFromLayer({ layerName: MISMATCH_LAYER });
     await sdk.Map.removeAllFeaturesFromLayer({ layerName: SR_LAYER });
     segMatchCache.clear();
-    const checkSr = settings.checkSrNames && srFeatures !== null;
+    const checkSr = settings.checkSrNames;
     if (!settings.enabled || (!fcFeatures.size && !checkSr)) return;
 
     const [minLon, minLat, maxLon, maxLat] = await sdk.Map.getMapExtent();
     const project = projector((minLat + maxLat) / 2);
     const fcGrid = buildFcIndex(project);
-    const srGrid = checkSr ? buildSrIndex(project) : null;
     const segGrid = makeGrid();
     const segments = await sdk.DataModel.Segments.getAll();
 
@@ -563,7 +549,7 @@
         }
       }
       const names = await streetNamesOf(seg);
-      const srIssues = checkSr ? invalidSrNames(names, mb, srGrid) : [];
+      const srIssues = checkSr ? invalidSrNames(names) : [];
       if (srIssues.length) {
         srFlagged.push({ type: "Feature", id: `sr-${seg.id}`, geometry: seg.geometry, properties: { segId: seg.id } });
       }
@@ -575,8 +561,8 @@
       }
       const fc = fcFeatures.get(best.fid)?.properties.FUNCLASS;
       // A segment carrying several designations takes the highest requirement.
-      // SR names that FDOT doesn't confirm here are ignored, so a bad name
-      // shows as an SR-name issue instead of a misleading road-type flag.
+      // SR names that aren't real Florida State Roads are ignored, so a bad
+      // name shows as an SR-name issue instead of a misleading road-type flag.
       let system = "local";
       let expected = expectedRoadType(fc, "local");
       for (const name of names) {
@@ -634,7 +620,7 @@
       row("Current type", mismatch.actual);
       row("Names", mismatch.names?.length ? mismatch.names.join(", ") : "(none)");
       if (mismatch.srIssues?.length) {
-        row("SR name check", `${mismatch.srIssues.join(", ")} not on FDOT State Roads here`);
+        row("SR name check", `${mismatch.srIssues.join(", ")} is not a Florida State Road`);
       } else if (settings.checkSrNames && mismatch.names?.some(srNumberOfName)) {
         row("SR name check", "OK");
       }
@@ -727,17 +713,17 @@
     wrap.append(opLabel);
 
     wrap.append(
-      checkbox("Check SR-xxx names against FDOT State Roads", settings.checkSrNames, (v) => {
+      checkbox("Check SR-xxx names against Florida State Road list", settings.checkSrNames, (v) => {
         settings.checkSrNames = v;
         saveSettings();
-        fetchFcForView();
+        renderMismatches();
       })
     );
 
     const mmLegend = document.createElement("div");
     mmLegend.append(legendSwatch("#FF1744"), document.createTextNode("Segment typed lower than FC suggests"));
     const srLegend = document.createElement("div");
-    srLegend.append(legendSwatch("#FF9100"), document.createTextNode("SR name not on FDOT State Roads here"));
+    srLegend.append(legendSwatch("#FF9100"), document.createTextNode("SR number that isn't a Florida State Road"));
     wrap.append(mmLegend, srLegend);
 
     ui.status = document.createElement("div");
