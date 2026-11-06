@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WME Florida Functional Classification Overlay
 // @namespace    https://github.com/makotosan/wme-fl-funcclass
-// @version      0.5.1
+// @version      0.5.2
 // @description  Overlays FDOT functional classification on the Waze Map Editor, colored by the Waze road type each FC calls for, and flags under-typed segments.
 // @author       makoto
 // @license      MIT
@@ -135,7 +135,10 @@
     const bus = /\b(BUS|BUSINESS|SPUR|LOOP)\b/.test(n);
     if (/^I-\d+/.test(n)) return bus ? "interstateBus" : "interstate";
     if (/^US-\d+/.test(n)) return bus ? "usBus" : "us";
-    if (/^(SR|FL)-\d+/.test(n)) return bus ? "stateBus" : "state";
+    // State roads follow the same strict rule as the SR name check: "SR-50" or
+    // "SR-50 E" only, plus BUS/SPUR/LOOP routes. "SR-20 Frontage" etc. are local.
+    if (srNumberOfName(n)) return "state";
+    if (/^(?:SR|FL)-\d+ (?:BUS|BUSINESS|SPUR|LOOP)(?: [NSEW])?$/.test(n.trim())) return "stateBus";
     if (/^CR-\d+/.test(n)) return "county";
     return "local";
   }

@@ -18,7 +18,7 @@ Florida is in the Southeast Region (SER) and follows the [USA road-type standard
   | 08 / 18 Minor Collector | Primary Street |
   | 09 / 19 Local | Street |
 
-- **Under-typed segments (red dashed outline).** Each segment is matched to the nearest FDOT line that runs the same direction. The script then works out the expected type from the full USA table. It reads the highway system from the segment's primary and alternate names (`I-`, `US-`, `SR-`, `CR-`, with BUS/SPUR/LOOP handled separately).
+- **Under-typed segments (red dashed outline).** Each segment is matched to the nearest FDOT line that runs the same direction. The script then works out the expected type from the full USA table. It reads the highway system from the segment's primary and alternate names (`I-`, `US-`, `SR-`, `CR-`, with BUS/SPUR/LOOP handled separately). State roads use the same strict rule as the SR name check: only `SR-50`, `SR-50 E` or `SR-60 BUS` count, so names like `SR-20 Frontage` are treated as local roads.
   - A segment is not flagged when a correctly typed road runs alongside it in the same direction. This covers turn lanes, connectors and frontage roads.
   - The opposite carriageway of a divided road doesn't count as cover, so a mistyped carriageway is still flagged.
 - **State Road name check (orange dotted outline).** A segment named `SR-N` is flagged when N isn't a Florida State Road number. The typical case is a county road mislabeled as a state road (`SR-420` that should be `CR-420`).
