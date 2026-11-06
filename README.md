@@ -71,7 +71,7 @@ The FC → road type defaults are in `FC_TO_RT`, and the full table is `USA_TABL
 - **Frontage roads:** the "at least Primary Street" rule isn't checked.
 - **Promotions:** roads raised above their class for continuity are never flagged. Only roads typed lower than expected are.
 - **Name formats:** names that aren't in `I-`/`US-`/`SR-`/`CR-` form are treated as locally maintained.
-- **SR name check:** only `SR-`/`FL-` names are checked, and only whether the number exists in Florida. A real number on the wrong road (for example `SR-434` on SR 46) isn't caught. Letter suffixes and `SR-A1A` aren't checked.
+- **SR name check:** only plain route names are checked (`SR-50` or `SR-50 E`). Names with anything else after the number, such as `SR-400 Access Rd`, `SR-20 Frontage` or `SR-60 BUS`, are skipped. The check only asks whether the number exists in Florida. A real number on the wrong road (for example `SR-434` on SR 46) isn't caught. Letter suffixes and `SR-A1A` aren't checked.
 - **Wide divided roads:** carriageways far from FDOT's single median line may fall outside the match distances.
 
 ## Built with

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WME Florida Functional Classification Overlay
 // @namespace    https://github.com/makotosan/wme-fl-funcclass
-// @version      0.5.0
+// @version      0.5.1
 // @description  Overlays FDOT functional classification on the Waze Map Editor, colored by the Waze road type each FC calls for, and flags under-typed segments.
 // @author       makoto
 // @license      MIT
@@ -479,9 +479,10 @@
     "994 996 997 998 1010 1051 1151 1153 1155 2221 5001 5005 5009 5050 5052 5054 9336"
   ).split(" "));
 
-  // "SR-420", "SR-9A", "SR-60 BUS" -> "420", "9", "60". Numbers only: FDOT's
-  // letter suffixes (5A, 30F, 19S) don't consistently match signage.
-  const srNumberOfName = (name) => name?.toUpperCase().match(/^(?:SR|FL)-(\d+)/)?.[1] ?? null;
+  // Only plain route names are checked: "SR-420" or "SR-50 E" -> "420", "50".
+  // Anything else after the number ("SR-400 Access Rd", "SR-20 Frontage",
+  // "SR-9A", "SR-60 BUS") is a different road or variant and is skipped.
+  const srNumberOfName = (name) => name?.trim().toUpperCase().match(/^(?:SR|FL)-(\d+)(?: [NSEW])?$/)?.[1] ?? null;
 
   // SR-xxx names whose number isn't a Florida State Road anywhere.
   const invalidSrNames = (names) =>
