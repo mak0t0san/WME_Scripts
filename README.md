@@ -28,6 +28,7 @@ Florida is in the Southeast Region (SER) and follows the [USA road-type standard
   - its names, highway system, current type and expected type
   - the result of the SR name check
   - the FDOT roadway ID, class, county and mileposts
+  - a link that opens FDOT's FC layer in the ArcGIS Map Viewer, centered on the segment with a marker and at the same zoom. With nothing selected, the link opens at the WME map center instead.
 - **Settings.** The **FL FC** tab has:
   - checkboxes for each class
   - an overlay opacity slider

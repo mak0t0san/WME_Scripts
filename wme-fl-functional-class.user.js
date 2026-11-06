@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WME Florida Functional Classification Overlay
 // @namespace    https://github.com/makotosan/wme-fl-funcclass
-// @version      0.4.0
+// @version      0.5.0
 // @description  Overlays FDOT functional classification on the Waze Map Editor, colored by the Waze road type each FC calls for, and flags under-typed segments.
 // @author       makoto
 // @license      MIT
@@ -28,6 +28,9 @@
   const MAX_PAGES = 10;
   const QUERY_URL =
     "https://services1.arcgis.com/O1JpcwDW8sjYuddV/arcgis/rest/services/Functional_Classification_TDA/FeatureServer/0/query";
+  // ArcGIS Map Viewer with the FDOT FC layer item added (used for "open in FDOT map" links).
+  const FDOT_LAYER_ITEM = "5c629bc81b104fca8d937343cdcefe29";
+  const MAPVIEWER_URL = "https://www.arcgis.com/apps/mapviewer/index.html";
 
   // --- Waze road types: id (SDK ROAD_TYPE), rank (higher = more important), WME color ---
   const RT = {
@@ -823,16 +826,59 @@
     }
   }
 
+  // ArcGIS Map Viewer URL centered on lon/lat at the given zoom, with the FDOT FC
+  // layer loaded and a marker on the spot. WME and ArcGIS both use standard web
+  // mercator zoom levels, so the zoom carries over as-is.
+  function fdotMapUrl(lon, lat, zoom, title) {
+    const x = lon.toFixed(6);
+    const y = lat.toFixed(6);
+    const params = [
+      `layers=${FDOT_LAYER_ITEM}`,
+      `center=${x},${y}`,
+      `level=${Math.round(Math.min(20, Math.max(10, zoom)))}`,
+      `marker=${x};${y};;${encodeURIComponent(title)}`,
+    ];
+    return `${MAPVIEWER_URL}?${params.join("&")}`;
+  }
+
+  function appendFdotLink(url, text) {
+    const div = document.createElement("div");
+    div.style.marginTop = "6px";
+    const a = document.createElement("a");
+    a.href = url;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    a.textContent = text;
+    div.append(a);
+    ui.info.append(div);
+  }
+
+  // Midpoint (by length) of a lon/lat LineString. Degree-space is fine at this scale.
+  function lonLatMidpoint(coords) {
+    return midpointAndBearing(coords)?.p ?? coords[0];
+  }
+
   async function showSelectedSegmentInfo() {
     if (!ui.info) return;
     const sel = await sdk.Editing.getSelection();
+    const zoom = await sdk.Map.getZoomLevel();
     if (!sel || String(sel.objectType).toLowerCase() !== "segment" || !sel.ids.length) {
       ui.info.textContent = "Select a segment to see its FC match.";
+      const c = await sdk.Map.getMapCenter();
+      appendFdotLink(fdotMapUrl(c.lon, c.lat, zoom, "WME map center"), "Open FDOT FC map here ↗");
       return;
     }
-    const match = segMatchCache.get(sel.ids[0]);
+    const segId = sel.ids[0];
+    const match = segMatchCache.get(segId);
     if (match) showInfo(match.fid, match);
-    else ui.info.textContent = `Segment ${sel.ids[0]}: no FC line matched (or not in view).`;
+    else ui.info.textContent = `Segment ${segId}: no FC line matched (or not in view).`;
+
+    const seg = await sdk.DataModel.Segments.getById({ segmentId: segId });
+    const coords = seg?.geometry?.coordinates;
+    if (coords?.length) {
+      const [lon, lat] = lonLatMidpoint(coords);
+      appendFdotLink(fdotMapUrl(lon, lat, zoom, `WME segment ${segId}`), "Open this segment in the FDOT FC map ↗");
+    }
   }
 
   async function applyVisibility() {
@@ -845,7 +891,10 @@
     const refetch = debounce(fetchFcForView, 500);
     const recheck = debounce(renderMismatches, 750);
 
+    const refreshInfo = debounce(showSelectedSegmentInfo, 500);
     sdk.Events.on({ eventName: "wme-map-move-end", eventHandler: refetch });
+    // Keeps the "open FDOT map here" link pointing at the current map center.
+    sdk.Events.on({ eventName: "wme-map-move-end", eventHandler: refreshInfo });
 
     sdk.Events.on({
       eventName: "wme-layer-checkbox-toggled",
@@ -878,6 +927,7 @@
     await buildTab();
     await setupLayers();
     wireEvents();
+    await showSelectedSegmentInfo();
     await fetchFcForView();
     console.log(`[${SCRIPT_NAME}] ready`);
   }
