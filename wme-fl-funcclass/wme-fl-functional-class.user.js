@@ -1,10 +1,14 @@
 // ==UserScript==
 // @name         WME Florida Functional Classification Overlay
-// @namespace    https://github.com/makotosan/wme-fl-funcclass
-// @version      0.5.2
+// @namespace    https://github.com/mak0t0san/WME_Scripts
+// @version      0.5.3
 // @description  Overlays FDOT functional classification on the Waze Map Editor, colored by the Waze road type each FC calls for, and flags under-typed segments.
 // @author       makoto
 // @license      MIT
+// @homepageURL  https://github.com/mak0t0san/WME_Scripts/tree/main/wme-fl-funcclass
+// @supportURL   https://github.com/mak0t0san/WME_Scripts/issues
+// @updateURL    https://raw.githubusercontent.com/mak0t0san/WME_Scripts/main/wme-fl-funcclass/wme-fl-functional-class.user.js
+// @downloadURL  https://raw.githubusercontent.com/mak0t0san/WME_Scripts/main/wme-fl-funcclass/wme-fl-functional-class.user.js
 // @match        https://www.waze.com/*editor*
 // @match        https://beta.waze.com/*editor*
 // @exclude      https://www.waze.com/*user/editor*
