@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WME Florida Functional Classification Overlay
 // @namespace    https://github.com/mak0t0san/WME_Scripts
-// @version      0.5.3
+// @version      0.6.0
 // @description  Overlays FDOT functional classification on the Waze Map Editor, colored by the Waze road type each FC calls for, and flags under-typed segments.
 // @author       makoto
 // @license      MIT
@@ -27,6 +27,8 @@
   const MISMATCH_LAYER = "fl-funcclass-mismatch";
   const SR_LAYER = "fl-funcclass-srname";
   const CHECKBOX_NAME = "FL Functional Class";
+  const UNDER_COLOR = "#FF1744"; // typed lower than FC calls for
+  const OVER_COLOR = "#2962FF"; // typed higher than FC allows
   const SETTINGS_KEY = "wme-fl-funcclass-settings";
   const MIN_ZOOM = 14;
   const MAX_PAGES = 10;
@@ -147,6 +149,17 @@
     return "local";
   }
 
+  // Over-typed check: the highest type an FC row allows, when that's above the
+  // table's minimum. FDOT's 02/12 covers both "Other Freeway" (Freeway) and
+  // "Other Expressway" (Major Highway), so a Freeway there is fine.
+  const MAX_ABOVE_TABLE = { 2: RT.FREEWAY };
+
+  /** Highest acceptable road type: the table value, or MAX_ABOVE_TABLE if higher. */
+  function maxRoadType(fc, expected) {
+    const extra = MAX_ABOVE_TABLE[Number(fc) % 10];
+    return extra && extra.rank > expected.rank ? extra : expected;
+  }
+
   /** Expected road type for an FC code on a road in the given highway system. */
   function expectedRoadType(fc, system) {
     const n = Number(fc);
@@ -161,6 +174,7 @@
     opacity: 0.6,
     mismatchesOnly: false,
     checkSrNames: true,
+    checkOverTyped: true,
     groups: Object.fromEntries(FC_GROUPS.map((g) => [g.key, g.key !== "local"])),
   };
 
@@ -551,10 +565,13 @@
       const { seg, segRt, mb } = cand;
       let best = null;
       let bestD = Infinity;
+      const nearbyFids = new Set(); // every FC line within match range, for the over-typed check
       for (const e of fcGrid.near(mb.p)) {
         if (angleDiff(e.brg, mb.brg) > MATCH_ANGLE_DEG) continue;
         const d = distPointToSeg(mb.p, e.a, e.b);
-        if (d < bestD && d <= MATCH_DIST_M) {
+        if (d > MATCH_DIST_M) continue;
+        nearbyFids.add(e.fid);
+        if (d < bestD) {
           bestD = d;
           best = e;
         }
@@ -574,36 +591,52 @@
       // A segment carrying several designations takes the highest requirement.
       // SR names that aren't real Florida State Roads are ignored, so a bad
       // name shows as an SR-name issue instead of a misleading road-type flag.
-      let system = "local";
-      let expected = expectedRoadType(fc, "local");
-      for (const name of names) {
-        if (srIssues.includes(name)) continue;
-        const sys = systemOfName(name);
-        const rt = expectedRoadType(fc, sys);
-        if (rt.rank > expected.rank) {
-          expected = rt;
-          system = sys;
+      const systems = names.filter((n) => !srIssues.includes(n)).map(systemOfName);
+      const expectedFor = (fcCode) => {
+        let system = "local";
+        let rt = expectedRoadType(fcCode, "local");
+        for (const sys of systems) {
+          const r = expectedRoadType(fcCode, sys);
+          if (r.rank > rt.rank) {
+            rt = r;
+            system = sys;
+          }
         }
+        return { rt, system };
+      };
+      const { rt: expected, system } = expectedFor(fc);
+      const maxAllowed = maxRoadType(fc, expected);
+      const isUnder = segRt.rank < expected.rank && !isCovered(cand, expected.rank, segGrid);
+      // Over-typed only if no FC line in range allows this type. The nearest
+      // line can be the wrong one (e.g. a side street beside a divided road's
+      // carriageway), so any nearby higher class clears the segment.
+      let isOver = false;
+      if (settings.checkOverTyped && segRt.rank > maxAllowed.rank) {
+        isOver = ![...nearbyFids].some((fid) => {
+          const code = fcFeatures.get(fid)?.properties.FUNCLASS;
+          return maxRoadType(code, expectedFor(code).rt).rank >= segRt.rank;
+        });
       }
-      const isFlagged = segRt.rank < expected.rank && !isCovered(cand, expected.rank, segGrid);
       segMatchCache.set(seg.id, {
-        segId: seg.id, expected: expected.label, actual: segRt.label, fid: best.fid, flagged: isFlagged,
-        system: SYSTEM_LABELS[system], names, srIssues,
+        segId: seg.id, expected: expected.label, maxAllowed: maxAllowed.label, actual: segRt.label,
+        fid: best.fid, flagged: isUnder, over: isOver, system: SYSTEM_LABELS[system], names, srIssues,
       });
-      if (isFlagged) {
+      if (isUnder || isOver) {
         flagged.push({
           type: "Feature",
           id: `mm-${seg.id}`,
           geometry: seg.geometry,
-          properties: { segId: seg.id },
+          properties: { segId: seg.id, kind: isUnder ? "under" : "over" },
         });
       }
     }
     if (flagged.length) await sdk.Map.addFeaturesToLayer({ layerName: MISMATCH_LAYER, features: flagged });
     if (srFlagged.length) await sdk.Map.addFeaturesToLayer({ layerName: SR_LAYER, features: srFlagged });
     showSelectedSegmentInfo(); // refresh in case the selected segment's match changed
+    const overCount = flagged.filter((f) => f.properties.kind === "over").length;
     setStatus(
-      `${lastFetchInfo} · ${flagged.length} under-typed segment(s)` +
+      `${lastFetchInfo} · ${flagged.length - overCount} under-typed` +
+        (settings.checkOverTyped ? ` · ${overCount} over-typed` : "") +
         (checkSr ? ` · ${srFlagged.length} SR-name issue(s)` : "")
     );
   }
@@ -637,8 +670,10 @@
       }
       if (mismatch.expected) {
         row("Highway system", mismatch.system);
-        row("Expected type", mismatch.expected);
-        row("Flagged", mismatch.flagged ? "Yes – typed lower than FC" : "No");
+        row("Expected type", mismatch.maxAllowed && mismatch.maxAllowed !== mismatch.expected
+          ? `${mismatch.expected} (up to ${mismatch.maxAllowed})` : mismatch.expected);
+        row("Flagged", mismatch.flagged ? "Yes – typed lower than FC"
+          : mismatch.over ? "Yes – typed higher than FC allows" : "No");
       } else {
         row("FC", "No FC line matched");
       }
@@ -731,11 +766,21 @@
       })
     );
 
+    wrap.append(
+      checkbox("Flag segments typed higher than FC allows", settings.checkOverTyped, (v) => {
+        settings.checkOverTyped = v;
+        saveSettings();
+        renderMismatches();
+      })
+    );
+
     const mmLegend = document.createElement("div");
-    mmLegend.append(legendSwatch("#FF1744"), document.createTextNode("Segment typed lower than FC suggests"));
+    mmLegend.append(legendSwatch(UNDER_COLOR), document.createTextNode("Segment typed lower than FC suggests"));
+    const overLegend = document.createElement("div");
+    overLegend.append(legendSwatch(OVER_COLOR), document.createTextNode("Segment typed higher than FC allows"));
     const srLegend = document.createElement("div");
     srLegend.append(legendSwatch("#FF9100"), document.createTextNode("SR number that isn't a Florida State Road"));
-    wrap.append(mmLegend, srLegend);
+    wrap.append(mmLegend, overLegend, srLegend);
 
     ui.status = document.createElement("div");
     ui.status.style.cssText = "margin-top:8px;color:#555;font-style:italic";
@@ -783,10 +828,13 @@
     });
     await sdk.Map.addLayer({
       layerName: MISMATCH_LAYER,
+      styleContext: {
+        color: ({ feature }) => (feature?.properties.kind === "over" ? OVER_COLOR : UNDER_COLOR),
+      },
       styleRules: [
         {
           style: {
-            strokeColor: "#FF1744",
+            strokeColor: "${color}",
             strokeWidth: 16,
             strokeOpacity: 0.85,
             strokeDashstyle: "dash",

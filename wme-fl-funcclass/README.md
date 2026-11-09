@@ -21,6 +21,10 @@ Florida is in the Southeast Region (SER) and follows the [USA road-type standard
 - **Under-typed segments (red dashed outline).** Each segment is matched to the nearest FDOT line that runs the same direction. The script then works out the expected type from the full USA table. It reads the highway system from the segment's primary and alternate names (`I-`, `US-`, `SR-`, `CR-`, with BUS/SPUR/LOOP handled separately). State roads use the same strict rule as the SR name check: only `SR-50`, `SR-50 E` or `SR-60 BUS` count, so names like `SR-20 Frontage` are treated as local roads.
   - A segment is not flagged when a correctly typed road runs alongside it in the same direction. This covers turn lanes, connectors and frontage roads.
   - The opposite carriageway of a divided road doesn't count as cover, so a mistyped carriageway is still flagged.
+- **Over-typed segments (blue dashed outline).** A segment is flagged when it's typed higher than its FC allows. For example, a Minor Highway on a collector that only calls for Primary Street. This check can be turned off in settings.
+  - FC 02/12 may be either Major Highway or Freeway, because FDOT combines "Other Freeway" and "Other Expressway" in one code.
+  - A segment is only flagged if no FC line within match range allows its type. This avoids false flags when the nearest line belongs to a smaller side road.
+  - Only segments that match an FC line are checked. Local roads (09/19) are hidden by default, so turn on the **Local** class to check over-typed local streets.
 - **State Road name check (orange dotted outline).** A segment named `SR-N` is flagged when N isn't a Florida State Road number. The typical case is a county road mislabeled as a state road (`SR-420` that should be `CR-420`).
   - The 520 valid numbers are hard-coded in the script (`FL_STATE_ROADS`). They come from FDOT's State Roads layer plus Wikipedia's list of Florida state roads, captured 2026-11-04.
   - Invalid SR names are ignored for the road-type check, so a bad name shows here and not as a misleading red flag.
@@ -34,6 +38,7 @@ Florida is in the Southeast Region (SER) and follows the [USA road-type standard
   - an overlay opacity slider
   - a "show mismatches only" switch
   - a switch for the SR name check
+  - a switch for the over-typed check
 
   Settings are saved in `localStorage`. The overlay as a whole is turned on and off from WME's layer list (**FL Functional Class**).
 
@@ -69,7 +74,7 @@ The FC → road type defaults are in `FC_TO_RT`, and the full table is `USA_TABL
 
 - **FC 02/12:** FDOT puts "Other Freeway" and "Other Expressway" in one code. The script uses Major Highway as the minimum, so fully controlled-access roads typed Major Highway are not flagged for being below Freeway.
 - **Frontage roads:** the "at least Primary Street" rule isn't checked.
-- **Promotions:** roads raised above their class for continuity are never flagged. Only roads typed lower than expected are.
+- **Promotions:** roads raised above their class for continuity, or by local guidance, are flagged as over-typed. The script can't tell a deliberate promotion from a mistake, so check before downgrading. Turn the over-typed check off if it gets noisy.
 - **Name formats:** names that aren't in `I-`/`US-`/`SR-`/`CR-` form are treated as locally maintained.
 - **SR name check:** only plain route names are checked (`SR-50` or `SR-50 E`). Names with anything else after the number, such as `SR-400 Access Rd`, `SR-20 Frontage` or `SR-60 BUS`, are skipped. The check only asks whether the number exists in Florida. A real number on the wrong road (for example `SR-434` on SR 46) isn't caught. Letter suffixes and `SR-A1A` aren't checked.
 - **Wide divided roads:** carriageways far from FDOT's single median line may fall outside the match distances.
